@@ -5,9 +5,10 @@ import pyramid from './pyramid'
 import Genetics from './genetics'
 import readPixels from './read-pixels'
 
-const NUM_LAYERS = 5
-const NUM_GENES = 20
-const NUM_TRIANGLES = 64
+const NUM_LAYERS = 8
+const NUM_GENES = 10
+const MUTATION_RATE = 0.95
+const NUM_TRIANGLES = 256
 const TRIANGLE_RATIO = 3
 const MAX_HUE_CHANGE = 10
 const MAX_SATUATION_CHANGE = 5
@@ -15,6 +16,7 @@ const MAX_LIGHTNESS_CHANGE = 5
 const MAX_POS_CHANGE = 10
 const MAX_ALPHA_CHANGE = 0.05
 const NEW_TRIANGLE_RATE = 0.01
+const SWAP_RATE = 0.05
 
 const random = function (min, max) {
   return Math.random() * (max - min) + min
@@ -60,7 +62,6 @@ source.addEventListener('load', function () {
   })()
 
   let usingLayer = 0
-  window.useLayer = function (layer) { usingLayer = layer } // use live first
 
   const ga = Genetics({
     numGenes: NUM_GENES,
@@ -71,7 +72,7 @@ source.addEventListener('load', function () {
       }
       return triangles
     },
-    mutationRate: 1,
+    mutationRate: MUTATION_RATE,
     mutate: (function () {
       const mutations = [
         // change hue
@@ -142,6 +143,20 @@ source.addEventListener('load', function () {
       ]
       return function (triangles) {
         const idx = randomInt(0, NUM_TRIANGLES)
+
+        if (Math.random() < SWAP_RATE) {
+          const jdx = randomInt(0, NUM_TRIANGLES)
+          return triangles.map(function (triangle, i) {
+            if (i === idx) {
+              return triangles[jdx]
+            }
+            if (i === jdx) {
+              return triangles[idx]
+            }
+            return triangle
+          })
+        }
+
         return triangles.map(function (triangle, i) {
           if (i !== idx) {
             return triangle
@@ -185,13 +200,11 @@ source.addEventListener('load', function () {
         })
 
         const pixels = readPixels(context, 0, 0, layer.width, layer.height)
-        const multiWidth = source.width / layer.width
-        const multiHeight = source.height / layer.height
         let score = 0
         for (let i = 0; i < layer.width * layer.height; ++i) {
           score += colorDiff(pixels[i], layer.pixels[i])
         }
-        return (score * multiWidth * multiHeight)
+        return score / (layer.width * layer.height)
       }
     })()
   })
@@ -202,9 +215,15 @@ source.addEventListener('load', function () {
   const context = target.getContext('2d')
 
   const numIteration = document.getElementById('num-iteration')
+  const currentLayer = document.getElementById('current-layer')
   const bestScore = document.getElementById('best-score')
 
   const iterate = function () {
+    if (ga.bestScore() < 20) {
+      usingLayer = Math.min(NUM_LAYERS - 1, usingLayer + 1)
+      ga.reEvaluate()
+    }
+
     ga.iterate()
     ga.bestGene().forEach(function ({ color, points }) {
       context.fillStyle = color.rgbaString()
@@ -216,8 +235,9 @@ source.addEventListener('load', function () {
       context.closePath()
       context.fill()
     })
-    numIteration.innerHTML = ga.iteration().toString()
-    bestScore.innerHTML = ga.bestScore().toString()
+    numIteration.innerHTML = ga.iteration()
+    currentLayer.innerHTML = usingLayer
+    bestScore.innerHTML = ga.bestScore()
     requestAnimationFrame(iterate)
   }
   requestAnimationFrame(iterate)

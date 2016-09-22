@@ -31,6 +31,11 @@ const Genetics = function ({ numGenes, gene, mutationRate, mutate, cross, evalua
     },
     bestScore() {
       return genes_[0].score
+    },
+    reEvaluate() {
+      genes_ = genes_.map(function ({ value }) {
+        return { value, score: evaluate(value) }
+      }).sort(geneSorter)
     }
   }
 }
