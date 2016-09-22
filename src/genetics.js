@@ -1,5 +1,5 @@
 const geneSorter = function (g1, g2) {
-  return g1 - g2
+  return g1.score - g2.score
 }
 
 const Genetics = function ({ numGenes, gene, mutationRate, mutate, cross, evaluate }) {
@@ -11,13 +11,14 @@ const Genetics = function ({ numGenes, gene, mutationRate, mutate, cross, evalua
 
   return {
     iterate() {
+      iteration_++
       genes_ = genes_.concat(genes_.map(function (gene, i) {
         if (Math.random() < mutationRate) {
           const value = mutate(gene.value)
           return { value, score: evaluate(value) }
         } else {
           const j = Math.floor(Math.random() * numGenes)
-          const value = cross(gene.value, genes[j].value)
+          const value = cross(gene.value, genes_[j].value)
           return { value, score: evaluate(value) }
         }
       })).sort(geneSorter).slice(0, numGenes)
