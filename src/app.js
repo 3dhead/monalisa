@@ -5,18 +5,19 @@ import pyramid from './pyramid'
 import Genetics from './genetics'
 import readPixels from './read-pixels'
 
-const NUM_LAYERS = 8
+const NUM_LAYERS = 5
 const NUM_GENES = 10
 const MUTATION_RATE = 0.95
-const NUM_TRIANGLES = 256
-const TRIANGLE_RATIO = 3
-const MAX_HUE_CHANGE = 10
-const MAX_SATUATION_CHANGE = 5
-const MAX_LIGHTNESS_CHANGE = 5
-const MAX_POS_CHANGE = 10
-const MAX_ALPHA_CHANGE = 0.05
-const NEW_TRIANGLE_RATE = 0.01
-const SWAP_RATE = 0.05
+const NUM_TRIANGLES = 512
+const MAX_HUE_CHANGE = 5
+const MAX_SATUATION_CHANGE = 0.02
+const MAX_LIGHTNESS_CHANGE = 0.02
+const MAX_POS_CHANGE = 2
+const MAX_ALPHA_CHANGE = 0.02
+const NEW_TRIANGLE_RATE = 0.05
+const TRIANGLE_MUTATION_RATE = 0.005
+const SWAP_RATE = 0.1
+const TOLORATE_SCORE = 5
 
 const random = function (min, max) {
   return Math.random() * (max - min) + min
@@ -27,7 +28,7 @@ const randomInt = function (min, max) {
 }
 
 const randomColor = function () {
-  return Color({ r: randomInt(0, 256), g: randomInt(0, 256), b: randomInt(0, 256), a: random(0, 1) })
+  return Color({ r: randomInt(0, 256), g: randomInt(0, 256), b: randomInt(0, 256), a: randgen.rnorm(0.3, 0.1) })
 }
 
 const colorDiff = function (c1, c2) {
@@ -42,26 +43,29 @@ const source = document.getElementById('source')
 source.addEventListener('load', function () {
 
   const layers = pyramid(source, NUM_LAYERS)
+  let usingLayer = 0
 
   const randomMovement = function ({ x, y }, deviation) {
+    const { ratio } = layers[usingLayer]
     return {
-      x: x + randgen.rnorm(0, deviation),
-      y: y + randgen.rnorm(0, deviation)
+      x: x + randgen.rnorm(0, deviation * ratio),
+      y: y + randgen.rnorm(0, deviation * ratio)
     }
   }
 
   const newTriangle = (function () {
-    const deviation = Math.sqrt(source.width * source.height) / TRIANGLE_RATIO
     return function () {
-      const p0 = { x: random(0, source.width), y: random(0, source.height) }
+      const origin = { x: random(0, source.width), y: random(0, source.height) }
       return {
         color: randomColor(),
-        points: [ p0, randomMovement(p0, deviation), randomMovement(p0, deviation) ]
+        points: [
+          randomMovement(origin, MAX_POS_CHANGE),
+          randomMovement(origin, MAX_POS_CHANGE),
+          randomMovement(origin, MAX_POS_CHANGE)
+        ]
       }
     }
   })()
-
-  let usingLayer = 0
 
   const ga = Genetics({
     numGenes: NUM_GENES,
@@ -115,12 +119,13 @@ source.addEventListener('load', function () {
         // change opacity
         function ({ color, points }) {
           return {
-            color: color.clone().alpha(Math.max(0, Math.min(color.alpha() + randgen.rnorm(0, MAX_ALPHA_CHANGE)))),
+            color: color.clone().alpha(Math.max(0.15, Math.min(0.6, color.alpha() + randgen.rnorm(0, MAX_ALPHA_CHANGE)))),
             points
           }
         },
         // move p0
         function ({ color, points }) {
+          const { ratio } = layers[usingLayer]
           return {
             color,
             points: [ randomMovement(points[0], MAX_POS_CHANGE), points[1], points[2] ]
@@ -128,6 +133,7 @@ source.addEventListener('load', function () {
         },
         // move p1
         function ({ color, points }) {
+          const { ratio } = layers[usingLayer]
           return {
             color,
             points: [ points[0], randomMovement(points[1], MAX_POS_CHANGE), points[2] ]
@@ -135,6 +141,7 @@ source.addEventListener('load', function () {
         },
         // move p2
         function ({ color, points }) {
+          const { ratio } = layers[usingLayer]
           return {
             color,
             points: [ points[0], points[1], randomMovement(points[2], MAX_POS_CHANGE) ]
@@ -142,10 +149,11 @@ source.addEventListener('load', function () {
         }
       ]
       return function (triangles) {
-        const idx = randomInt(0, NUM_TRIANGLES)
-
+        const { ratio } = layers[usingLayer]
+        const topLayer = Math.min(0, Math.floor(NUM_TRIANGLES - (NUM_TRIANGLES / ratio)))
+        const idx = randomInt(topLayer, NUM_TRIANGLES)
         if (Math.random() < SWAP_RATE) {
-          const jdx = randomInt(0, NUM_TRIANGLES)
+          const jdx = randomInt(topLayer, NUM_TRIANGLES)
           return triangles.map(function (triangle, i) {
             if (i === idx) {
               return triangles[jdx]
@@ -158,13 +166,15 @@ source.addEventListener('load', function () {
         }
 
         return triangles.map(function (triangle, i) {
-          if (i !== idx) {
+          if (i !== idx && Math.random() > TRIANGLE_MUTATION_RATE) {
             return triangle
           }
           if (Math.random() < NEW_TRIANGLE_RATE) {
             return newTriangle()
           }
-          return randgen.rlist(mutations)(triangle)
+          return mutations.reduce(function (t, mutation) {
+            return mutation(t)
+          }, triangle)
         })
       }
     })(),
@@ -218,13 +228,22 @@ source.addEventListener('load', function () {
   const currentLayer = document.getElementById('current-layer')
   const bestScore = document.getElementById('best-score')
 
-  const iterate = function () {
-    if (ga.bestScore() < 20) {
-      usingLayer = Math.min(NUM_LAYERS - 1, usingLayer + 1)
+  const useLayer = function (nextLayer) {
+    if (usingLayer !== nextLayer) {
+      usingLayer = nextLayer
       ga.reEvaluate()
+    }
+  }
+  window.useLayer = useLayer // temp expose
+
+  const iterate = function () {
+    const { ratio } = layers[usingLayer]
+    if (ga.bestScore() < TOLORATE_SCORE * ratio) {
+      useLayer(Math.min(NUM_LAYERS - 1, usingLayer + 1))
     }
 
     ga.iterate()
+    context.clearRect(0, 0, source.width, source.height)
     ga.bestGene().forEach(function ({ color, points }) {
       context.fillStyle = color.rgbaString()
       context.beginPath()
